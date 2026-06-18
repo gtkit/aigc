@@ -20,12 +20,12 @@ func TestIdentifierJSON(t *testing.T) {
 		t.Fatalf("JSON() error = %v", err)
 	}
 
-	var back Identifier
-	if err := json.Unmarshal([]byte(got), &back); err != nil {
+	var env envelope
+	if err := json.Unmarshal([]byte(got), &env); err != nil {
 		t.Fatalf("unmarshal AIGC json failed: %v", err)
 	}
-	if back != id {
-		t.Fatalf("round-trip mismatch: got %+v want %+v", back, id)
+	if env.AIGC != id {
+		t.Fatalf("round-trip mismatch: got %+v want %+v", env.AIGC, id)
 	}
 }
 
@@ -93,15 +93,11 @@ func TestWriteMP3(t *testing.T) {
 	}
 	value := body[1+nul+1:]
 
-	var back Identifier
-	if err := json.Unmarshal(value, &back); err != nil {
+	var env envelope
+	if err := json.Unmarshal(value, &env); err != nil {
 		t.Fatalf("AIGC 值无法反序列化: %v (%q)", err, value)
 	}
-	if back != id {
-		t.Fatalf("AIGC 值不一致: got %+v want %+v", back, id)
+	if env.AIGC != id {
+		t.Fatalf("AIGC 值不一致: got %+v want %+v", env.AIGC, id)
 	}
-}
-
-func readSynchsafe(b []byte) int {
-	return int(b[0])<<21 | int(b[1])<<14 | int(b[2])<<7 | int(b[3])
 }

@@ -9,8 +9,8 @@ type LabelingConfig struct {
 	Label             string // 1=是 / 2=可能是 / 3=疑似；空则默认按 LabelIs 处理
 	ContentProducer   string
 	ContentPropagator string
-	ReserveCode1      string
-	ReserveCode2      string
+	ReservedCode1     string
+	ReservedCode2     string
 	ArchiveDir        string // 隐式标识归档目录；空则不落盘
 	MarkerMP3         []byte // 显式标识素材（mp3 裸帧），空则不前置注入
 }
@@ -37,7 +37,7 @@ func (c LabelingConfig) NewIdentifier(produceID string) Identifier {
 		ContentProducer:   c.ContentProducer,
 		ProduceID:         produceID,
 		ContentPropagator: c.ContentPropagator,
-		ReserveCode1:      c.ReserveCode1,
-		ReserveCode2:      c.ReserveCode2,
+		ReservedCode1:     c.ReservedCode1,
+		ReservedCode2:     c.ReservedCode2,
 	}
 }

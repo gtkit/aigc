@@ -21,7 +21,7 @@ func ExampleIdentifier_JSON() {
 	}
 	fmt.Println(s)
 	// Output:
-	// {"Label":"1","ContentProducer":"PRODUCER-001","ProduceID":"20260618-0001"}
+	// {"AIGC":{"Label":"1","ContentProducer":"PRODUCER-001","ProduceID":"20260618-0001"}}
 }
 
 // ExampleLabelingConfig_NewIdentifier 演示用运行时配置构造一次合成的标识，
@@ -57,4 +57,25 @@ func ExampleWriteMP3() {
 	// Output:
 	// 以 ID3 开头: true
 	// 尾部保留原帧: true
+}
+
+// ExampleReadMP3 演示读回隐式标识做校验，以及裸帧不含标识；
+// found 返回值即可用于写入前的重复打标防护。
+func ExampleReadMP3() {
+	id := aigc.Identifier{Label: aigc.LabelIs, ContentProducer: "PRODUCER-001"}
+	labeled, _ := aigc.WriteMP3([]byte{0xff, 0xfb, 0x90, 0x00}, id)
+
+	got, found, err := aigc.ReadMP3(labeled)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("已标识:", found)
+	fmt.Println("生成者:", got.ContentProducer)
+
+	_, bare, _ := aigc.ReadMP3([]byte{0xff, 0xfb, 0x90, 0x00})
+	fmt.Println("裸帧已标识:", bare)
+	// Output:
+	// 已标识: true
+	// 生成者: PRODUCER-001
+	// 裸帧已标识: false
 }

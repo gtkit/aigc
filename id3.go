@@ -9,6 +9,9 @@ import "errors"
 // ErrEmptyValue 表示要写入的 AIGC 值为空。
 var ErrEmptyValue = errors.New("aigc: 写入的 AIGC 值为空")
 
+// ErrAlreadyLabeled 表示入参 mp3 已含本包写入的 AIGC 标识，拒绝重复打标。
+var ErrAlreadyLabeled = errors.New("aigc: mp3 已含 AIGC 标识")
+
 // synchsafe 把一个 ≤ 2^28-1 的整数编码为 4 字节 synchsafe 整数（每字节高位恒为 0，只用低 7 位）。
 func synchsafe(n int) [4]byte {
 	return [4]byte{
@@ -56,6 +59,12 @@ func id3v24Tag(description, value string) []byte {
 // WriteMP3 在 mp3 音频字节前置写入承载 AIGC 标识的 ID3v2.4 标签，返回带隐式标识的完整 mp3。
 // 入参 mp3 应为不含 ID3 标签的裸 mp3 帧流（百度流式 aue=3 的输出即是裸帧）。
 func WriteMP3(mp3 []byte, id Identifier) ([]byte, error) {
+	if _, found, rerr := ReadMP3(mp3); rerr != nil {
+		return nil, rerr
+	} else if found {
+		return nil, ErrAlreadyLabeled
+	}
+
 	value, err := id.JSON()
 	if err != nil {
 		return nil, err
