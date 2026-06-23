@@ -16,8 +16,10 @@
 
 ## 安装
 
+需 Go 1.26+：
+
 ```bash
-go get github.com/gtkit/aigc
+go get github.com/gtkit/aigc@v1.0.0
 ```
 
 ## 快速上手
@@ -28,21 +30,55 @@ import "github.com/gtkit/aigc"
 id := aigc.Identifier{
     Label:           aigc.LabelIs, // 1=是 / 2=可能是 / 3=疑似
     ContentProducer: "PRODUCER-001",
-    ProduceID:       "20260623-0001",
+    ProduceID:       "20260625-0001",
 }
 
 // —— wav（百度流式默认输出）——
-cue := aigc.RhythmWAV(16000)                                       // 摩斯码提示音(或读入预录语音 wav)
+cue := aigc.RhythmWAV(16000)                                        // 摩斯码提示音；须与正文同采样率/声道
 withCue, _ := aigc.PrependCue(wavAudio, cue, aigc.WAV, aigc.AtStart) // 显式标识：拼到起始
 final, _   := aigc.WriteMetadata(withCue, aigc.WAV, id)             // 隐式标识：写 AIGC 字段块
 
 // —— mp3 ——
 final2, _  := aigc.WriteMetadata(mp3Audio, aigc.MP3, id)            // 隐式：ID3 TXXX
-// mp3 显式标识需预置“同编码参数”的 mp3 提示音素材：
-withCue2, _ := aigc.PrependCue(mp3Audio, mp3Cue, aigc.MP3, aigc.AtEnd)
+withCue2, _ := aigc.PrependCue(mp3Audio, mp3Cue, aigc.MP3, aigc.AtEnd) // mp3Cue 须为同编码参数的预置 mp3 素材
 ```
 
-显式标识可只做隐式（跳过 `PrependCue`），或只做显式（跳过 `WriteMetadata`）。
+两步相互独立：可只做隐式标识（跳过 `PrependCue`），或只做显式标识（跳过 `WriteMetadata`）。
+
+## 端到端示例（百度流式对接）
+
+```go
+// 已从百度流式接口按到达顺序拼接得到完整音频字节 audio（wav 或 mp3）。
+// mp3Cue 为预置的、与正文同编码参数的 mp3 提示音素材；wav 用 RhythmWAV 现合成。
+func labelBaiduAudio(audio, mp3Cue []byte, format aigc.Format) ([]byte, error) {
+    id := aigc.Identifier{
+        Label:           aigc.LabelIs,
+        ContentProducer: "你的机构编码", // 对齐 GB 45438-2025 附录 E
+        ProduceID:       "20260625-0001",
+    }
+
+    // 1) 显式标识：在起始位置拼「短长短短」摩斯提示音
+    var (
+        withCue []byte
+        err     error
+    )
+    switch format {
+    case aigc.WAV:
+        cue := aigc.RhythmWAV(16000) // 须与正文同采样率(16k)、单声道
+        withCue, err = aigc.PrependCue(audio, cue, aigc.WAV, aigc.AtStart)
+    case aigc.MP3:
+        withCue, err = aigc.PrependCue(audio, mp3Cue, aigc.MP3, aigc.AtStart)
+    default:
+        return nil, aigc.ErrUnsupportedFormat
+    }
+    if err != nil {
+        return nil, err
+    }
+
+    // 2) 隐式标识：写入 AIGC 字段块
+    return aigc.WriteMetadata(withCue, format, id)
+}
+```
 
 ## 工作流程
 
