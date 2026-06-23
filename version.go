@@ -1,3 +1,4 @@
 package aigc
 
-const Version = "v1.0.0"
+// Version 是本包的语义化版本号。
+const Version = "v1.1.0"

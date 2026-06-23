@@ -17,9 +17,13 @@ const wavMetadataChunkID = "AIGC"
 
 // wavWriteMetadata 在 WAV 的 RIFF 容器末尾追加 AIGC 隐式标识。
 // 降险写两处：自定义 "AIGC" chunk + LIST/INFO 的 AIGC 子块，兼容不同检测工具。
+// 已含顶层 AIGC chunk 时返回 ErrAlreadyLabeled，避免重复打标。
 func wavWriteMetadata(audio, value []byte) ([]byte, error) {
 	if !isRIFFWAVE(audio) {
 		return nil, ErrInvalidWAV
+	}
+	if hasWAVChunk(audio, wavMetadataChunkID) {
+		return nil, ErrAlreadyLabeled
 	}
 	extra := buildChunk(wavMetadataChunkID, value)
 	extra = append(extra, buildListInfo(wavMetadataChunkID, value)...)
@@ -63,6 +67,28 @@ func wavPrependCue(audio, cue []byte, pos Position) ([]byte, error) {
 // isRIFFWAVE 报告 b 是否以 RIFF/WAVE 头开头。
 func isRIFFWAVE(b []byte) bool {
 	return len(b) >= 12 && string(b[0:4]) == "RIFF" && string(b[8:12]) == "WAVE"
+}
+
+// hasWAVChunk 报告 RIFF 顶层是否含指定 id 的 chunk（边界判断用 uint64 防溢出）。
+func hasWAVChunk(b []byte, id string) bool {
+	off := 12
+	for off+8 <= len(b) {
+		cid := string(b[off : off+4])
+		size := binary.LittleEndian.Uint32(b[off+4 : off+8])
+		start := off + 8
+		if uint64(start)+uint64(size) > uint64(len(b)) {
+			break
+		}
+		if cid == id {
+			return true
+		}
+		off = start + int(size)
+		if size%2 == 1 {
+			off++
+		}
+	}
+
+	return false
 }
 
 // wavFmtData 遍历 RIFF chunks，返回 fmt 块内容与 data 块采样数据。

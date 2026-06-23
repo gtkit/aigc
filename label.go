@@ -29,6 +29,10 @@ const (
 // ErrUnsupportedFormat 表示传入了本包不支持的音频格式。
 var ErrUnsupportedFormat = errors.New("aigc: 不支持的音频格式")
 
+// ErrAlreadyLabeled 表示音频已含 AIGC 标识，拒绝重复打标
+// （mp3 已含 ID3 标签 / wav 已含 AIGC chunk）。
+var ErrAlreadyLabeled = errors.New("aigc: 音频已含 AIGC 标识，拒绝重复打标")
+
 // jsonValue 返回写入元数据的 AIGC 值：七要素紧凑 JSON（对齐 GB 45438-2025 附录 E）。
 func (id Identifier) jsonValue() ([]byte, error) {
 	if err := id.Validate(); err != nil {
@@ -40,6 +44,7 @@ func (id Identifier) jsonValue() ([]byte, error) {
 
 // WriteMetadata 给完整音频写入 AIGC 隐式标识（文件元数据字段块），返回带标识的新字节。
 // 纯 Go 实现，内存操作，不依赖 ffmpeg、不落临时文件。入参须为完整音频（流式须先拼接完整）。
+// 入参已含 AIGC 标识时返回 ErrAlreadyLabeled。
 func WriteMetadata(audio []byte, format Format, id Identifier) ([]byte, error) {
 	value, err := id.jsonValue()
 	if err != nil {
@@ -66,4 +71,20 @@ func PrependCue(audio, cue []byte, format Format, pos Position) ([]byte, error) 
 	default:
 		return nil, ErrUnsupportedFormat
 	}
+}
+
+// Label 一步完成显式标识（可选）与隐式标识：cue 非空时先把它拼到 pos 位置（显式标识），
+// 再写入 AIGC 字段块（隐式标识）；cue 为空则只做隐式标识。
+// 等价于先 PrependCue 后 WriteMetadata，便于端到端调用。
+func Label(audio, cue []byte, format Format, pos Position, id Identifier) ([]byte, error) {
+	body := audio
+	if len(cue) > 0 {
+		var err error
+		body, err = PrependCue(audio, cue, format, pos)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return WriteMetadata(body, format, id)
 }

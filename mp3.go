@@ -1,10 +1,5 @@
 package aigc
 
-import "errors"
-
-// ErrAlreadyLabeled 表示入参 mp3 已含 ID3 标签，拒绝重复打标。
-var ErrAlreadyLabeled = errors.New("aigc: mp3 已含 ID3 标签，拒绝重复打标")
-
 // mp3MetadataDesc 是 ID3 TXXX 帧承载 AIGC 标识时的 description。
 const mp3MetadataDesc = "AIGC"
 

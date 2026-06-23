@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-25
+
+### Added
+
+- `Label(audio, cue, format, pos, id)`：端到端组合入口，一步完成显式标识（cue 非空时）与隐式标识；cue 为 nil 时只做隐式标识。
+
+### Changed
+
+- wav 隐式标识新增重复打标检测：已含 `AIGC` chunk 时返回 `ErrAlreadyLabeled`（与 mp3 对称）。
+- `ErrAlreadyLabeled` 文案改为通用「音频已含 AIGC 标识，拒绝重复打标」，wav/mp3 共用（导出名不变，`errors.Is` 兼容）。
+
 ## [1.0.0] - 2026-06-25
 
 ### Added
