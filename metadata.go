@@ -1,34 +1,27 @@
 // Package aigc 实现《人工智能生成合成内容标识办法》及强制性国标 GB 45438-2025
-// 要求的「文件元数据隐式标识」构造与写入。
+// 要求的 AIGC 标识：对百度流式合成的音频（mp3 会员 / pcm 免费）打显式标识与隐式标识。
 //
-// 当前仅实现 mp3 音频：把 AIGC 标识 JSON 写入 ID3v2.4 的 TXXX 帧（description=AIGC）。
+// 通过 Label 统一入口封装 ffmpeg：可选把显式标识提示音（预录提示语音或 RhythmWAV 生成的
+// 摩斯码）拼接到正文起始/末尾，统一编码输出 mp3，并把 Identifier 七要素写入文件元数据的
+// AIGC 键（隐式标识）。
 //
-// 字段名与值结构依据 GB 45438-2025 附录 E（规范性）：隐式标识扩展字段的名称或关键词中
-// 应含 "AIGC"，其值为字符串 {"AIGC":{"Label",...,"ReservedCode2"}}。本包以 ID3v2.4 的
-// TXXX 帧（description=AIGC）承载该值，满足附录 E a) 对字段命名的要求。
-//
-// 注：附录 F.2 的「音频文件元数据隐式标识示例」以图示给出，未明文规定 mp3 必须使用 ID3；
-// ID3v2 TXXX 是 mp3 元数据的事实标准，本包据此实现。
+// 字段名与值结构依据 GB 45438-2025 附录 E（规范性）；各要素值的字符集按附录 E j) 强制校验。
 package aigc
 
 import (
 	"errors"
 	"strings"
-
-	"github.com/gtkit/json/v2"
 )
 
-// Label 取值：生成合成标识属性。依据 GB 45438-2025（待 PDF 核对）。
+// Label 取值：生成合成标识属性。依据 GB 45438-2025。
 const (
 	LabelIs        = "1" // 是 AI 生成合成
 	LabelMaybe     = "2" // 可能是
 	LabelSuspected = "3" // 疑似
 )
 
-// metadataKey 是写入文件元数据时使用的扩展字段键名（ID3 TXXX 的 description）。
-const metadataKey = "AIGC"
-
 // Identifier 是文件元数据隐式标识的七要素，字段名与顺序对齐 GB 45438-2025 附录 E（规范性）。
+// 写入元数据时以 json tag 的键名序列化为紧凑 JSON，作为文件元数据 AIGC 键的值。
 type Identifier struct {
 	// Label 生成合成标识：1=是 / 2=可能是 / 3=疑似。
 	Label string `json:"Label"`
@@ -52,7 +45,12 @@ var ErrInvalidLabel = errors.New("aigc: Label 必须为 1/2/3")
 // ErrProducerRequired 表示缺少生成服务提供者标识。
 var ErrProducerRequired = errors.New("aigc: ContentProducer 不能为空")
 
-// Validate 做最小必填校验。生成服务提供者与 Label 是隐式标识的核心要素。
+// ErrInvalidCharset 表示要素值含 GB 45438-2025 附录 E j) 允许范围
+// （GB18030 指定的可见 ASCII 码位 0x20–0x7E）之外的字符。
+var ErrInvalidCharset = errors.New("aigc: 要素值含 0x20-0x7E 之外的字符")
+
+// Validate 做必填校验与附录 E j) 字符集校验。
+// 生成服务提供者与 Label 是隐式标识的核心要素；各要素值仅允许 GB18030 指定的可见 ASCII（0x20–0x7E）。
 func (id Identifier) Validate() error {
 	switch id.Label {
 	case LabelIs, LabelMaybe, LabelSuspected:
@@ -62,24 +60,26 @@ func (id Identifier) Validate() error {
 	if strings.TrimSpace(id.ContentProducer) == "" {
 		return ErrProducerRequired
 	}
+	for _, v := range []string{
+		id.ContentProducer, id.ProduceID, id.ReservedCode1,
+		id.ContentPropagator, id.PropagateID, id.ReservedCode2,
+	} {
+		if !isVisibleASCII(v) {
+			return ErrInvalidCharset
+		}
+	}
 
 	return nil
 }
 
-// envelope 是写入元数据的外层结构。附录 E b) 要求扩展字段的值为 {"AIGC":{...}} 字符串。
-type envelope struct {
-	AIGC Identifier `json:"AIGC"`
-}
-
-// JSON 返回写入元数据的标识值（紧凑 JSON 字符串），格式为 {"AIGC":{...}}，对齐附录 E b)。
-func (id Identifier) JSON() (string, error) {
-	if err := id.Validate(); err != nil {
-		return "", err
-	}
-	b, err := json.Marshal(envelope{AIGC: id})
-	if err != nil {
-		return "", err
+// isVisibleASCII 报告 s 是否仅含 GB18030 指定的可见 ASCII 码位（0x20–0x7E）。
+// 按字节校验：多字节 UTF-8（如中文）必有字节 > 0x7E，会被判为非法。
+func isVisibleASCII(s string) bool {
+	for i := range len(s) {
+		if s[i] < 0x20 || s[i] > 0x7e {
+			return false
+		}
 	}
 
-	return string(b), nil
+	return true
 }

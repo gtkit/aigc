@@ -1,12 +1,18 @@
 # aigc
 
-`github.com/gtkit/aigc` —— AI 生成合成内容的**文件元数据隐式标识**构造与写入。
+`github.com/gtkit/aigc` —— 给 AI 生成合成音频打 **AIGC 标识**的**纯 Go**工具（零外部进程依赖）：对百度流式合成的 **wav / mp3** 文件，加**显式标识**（起始/末尾拼提示音或摩斯码）与**隐式标识**（写文件元数据字段块）。
 
-依据《人工智能生成合成内容标识办法》及强制性国标 **GB 45438-2025**，把 AIGC 标识写入文件元数据。当前仅实现 mp3 音频：将标识 JSON 写入 ID3v2.4 的 `TXXX` 帧（`description=AIGC`），标签前置于音频帧。
+依据《人工智能生成合成内容标识办法》及强制性国标 **GB 45438-2025**。
 
-**合规依据**：字段名与值结构已对齐 GB 45438-2025 附录 E（规范性）——隐式标识扩展字段名含 `AIGC`，其值为字符串 `{"AIGC":{"Label","ContentProducer","ProduceID","ReservedCode1","ContentPropagator","PropagateID","ReservedCode2"}}`。
+## 特点
 
-> ⚠ **仍待确认**：附录 F.2「音频文件元数据隐式标识示例」以图示给出，未明文规定 mp3 的承载方式；本包采用 ID3v2.4 TXXX（mp3 元数据事实标准），满足附录 E a) 对字段命名的要求。附录 E j) 对各要素值的字符集约束（限 GB18030 指定的可见 ASCII 码位）本包未强制校验，由调用方保证。
+- **纯 Go、不依赖 ffmpeg**：内存 `[]byte` 进出，不落临时文件，部署无外部依赖。
+- **wav + mp3 双格式**：
+  - 隐式标识：wav 写 RIFF 的 `AIGC` chunk（同时写 `LIST/INFO` 降险）；mp3 写 ID3v2.4 TXXX。
+  - 显式标识：wav 采样层无损拼接；mp3 同参数帧拼接。
+- 字段结构对齐 GB 45438-2025 附录 E，要素值按附录 E j) 强制字符集校验。
+
+> 不做格式转换（pcm→mp3 那种需要编码器，本包不涉及）。百度流式裸流请先按序拼接成完整 wav/mp3 再调用。
 
 ## 安装
 
@@ -19,50 +25,47 @@ go get github.com/gtkit/aigc
 ```go
 import "github.com/gtkit/aigc"
 
-// 1. 构造标识
 id := aigc.Identifier{
     Label:           aigc.LabelIs, // 1=是 / 2=可能是 / 3=疑似
     ContentProducer: "PRODUCER-001",
-    ProduceID:       "20260618-0001",
+    ProduceID:       "20260623-0001",
 }
 
-// 2. 写入裸 mp3 帧（百度流式 aue=3 的输出即是裸帧）
-labeled, err := aigc.WriteMP3(rawMP3, id)
-if err != nil {
-    return err
-}
-// labeled 以 ID3v2.4 标签开头，原始音频帧原样跟随其后
+// —— wav（百度流式默认输出）——
+cue := aigc.RhythmWAV(16000)                                       // 摩斯码提示音(或读入预录语音 wav)
+withCue, _ := aigc.PrependCue(wavAudio, cue, aigc.WAV, aigc.AtStart) // 显式标识：拼到起始
+final, _   := aigc.WriteMetadata(withCue, aigc.WAV, id)             // 隐式标识：写 AIGC 字段块
+
+// —— mp3 ——
+final2, _  := aigc.WriteMetadata(mp3Audio, aigc.MP3, id)            // 隐式：ID3 TXXX
+// mp3 显式标识需预置“同编码参数”的 mp3 提示音素材：
+withCue2, _ := aigc.PrependCue(mp3Audio, mp3Cue, aigc.MP3, aigc.AtEnd)
 ```
 
-也可用运行时配置批量构造标识：
+显式标识可只做隐式（跳过 `PrependCue`），或只做显式（跳过 `WriteMetadata`）。
 
-```go
-cfg := aigc.LabelingConfig{
-    Enabled:         true,
-    ContentProducer: "PRODUCER-001",
-}
-if cfg.Active() {
-    id := cfg.NewIdentifier(produceID) // Label 留空时默认按 LabelIs
-    labeled, _ := aigc.WriteMP3(rawMP3, id)
-    _ = labeled
-}
+## 工作流程
+
+```
+百度流式分块 → 内存按序拼成完整 wav/mp3 []byte
+  → PrependCue：拼提示音/摩斯码到起始或末尾（显式标识，可选）
+  → WriteMetadata：写 AIGC 字段块（隐式标识）
+  → 带标识的 []byte（落盘或回传）
 ```
 
-更多可运行示例见 `example_test.go`。
+> 隐式标识须基于**完整音频 + 容器**写入，流式须先拼完整；但纯 Go 在内存完成，无需临时文件。
 
 ## API 概览
 
 | 符号 | 说明 |
 |------|------|
-| `Identifier` | 文件元数据隐式标识五要素（含两个预留码） |
-| `Identifier.Validate()` | 最小必填校验：`Label` 须为 1/2/3，`ContentProducer` 非空 |
-| `Identifier.JSON()` | 返回写入元数据的紧凑 JSON 字符串 |
-| `WriteMP3(mp3, id)` | 在裸 mp3 帧前置写入承载标识的 ID3v2.4 标签；已含标识则拒绝 |
-| `ReadMP3(mp3)` | 读回本包写入的 AIGC 标识，返回 `(Identifier, found, error)` |
-| `LabelingConfig` | 标识的运行时配置 |
-| `LabelingConfig.Active()` | 隐式标识是否应启用（开关开 + 生成者非空） |
-| `LabelingConfig.HasMarker()` | 是否有可注入的显式标识素材 |
-| `LabelingConfig.NewIdentifier(produceID)` | 用配置构造一次标识 |
+| `WriteMetadata(audio, format, id)` | 隐式标识：写 AIGC 字段块（wav→RIFF chunk / mp3→ID3 TXXX） |
+| `PrependCue(audio, cue, format, pos)` | 显式标识：把提示音拼到起始/末尾 |
+| `RhythmWAV(sampleRate)` | 合成「短长短短」摩斯节奏提示音（单声道 16-bit PCM WAV 素材） |
+| `Identifier` | 隐式标识七要素（对齐 GB 45438-2025 附录 E） |
+| `Identifier.Validate()` | 必填校验 + 附录 E j) 字符集校验 |
+| `Format`：`WAV` / `MP3` | 音频容器格式 |
+| `Position`：`AtStart` / `AtEnd` | 显式标识拼接位置 |
 
 常量：`LabelIs`(="1") / `LabelMaybe`(="2") / `LabelSuspected`(="3")。
 
@@ -70,27 +73,21 @@ if cfg.Active() {
 
 | 错误 | 触发条件 |
 |------|----------|
-| `ErrInvalidLabel` | `Label` 取值不在 1/2/3 之内 |
+| `ErrInvalidLabel` | `Label` 不在 1/2/3 之内 |
 | `ErrProducerRequired` | `ContentProducer` 为空 |
-| `ErrEmptyValue` | 待写入的 AIGC 值为空 |
-| `ErrAlreadyLabeled` | `WriteMP3` 入参已含本包写入的 AIGC 标识 |
-| `ErrCorruptTag` | mp3 以 ID3 开头但标签结构损坏（长度越界） |
+| `ErrInvalidCharset` | 要素值含 0x20–0x7E 之外的字符（违反附录 E j)） |
+| `ErrUnsupportedFormat` | 传入了不支持的 `Format` |
+| `ErrInvalidWAV` | 数据不是合法的 WAV(RIFF/WAVE) |
+| `ErrWAVParamMismatch` | 拼接的两段 WAV 的 fmt 参数不一致 |
+| `ErrAlreadyLabeled` | mp3 已含 ID3 标签，拒绝重复打标 |
 
 均为包级 `error` 值，可用 `errors.Is` 判定。
 
-## 读取与重复打标防护
+## 说明与约束
 
-```go
-id, found, err := aigc.ReadMP3(data)
-// found=true 表示已含本包写入的标识，可据此校验或避免重复打标
-```
-
-`WriteMP3` 已内建防护：入参若已含本包标识，直接返回 `ErrAlreadyLabeled`，不会叠加第二层标签。`ReadMP3` 仅识别本包 `WriteMP3` 写入的格式（ID3v2.4、标志位为 0、`description=AIGC` 的 TXXX 帧），其他情形返回 `found=false`。
-
-## 输入约定
-
-- `WriteMP3` 的入参 `mp3` 应为**不含 ID3 标签的裸 mp3 帧流**（百度流式 aue=3 的输出即是裸帧）。
-- ID3v2.4 帧长用 synchsafe 编码，单帧承载上限 `2^28-1` 字节，标识 JSON 远小于此。
+- **wav 隐式标识位置**：默认同时写自定义 `AIGC` chunk 与 `LIST/INFO` 子块（兼容不同检测工具）。最终以审核方检测工具读取的位置为准，确认后可收敛到一处。
+- **mp3 显式标识**：需 cue 与正文为**同编码参数**的裸 mp3 帧；库的 `RhythmWAV`（wav）不能直接拼进 mp3，mp3 档的提示音请预置 mp3 素材。拼接点可能有极轻微瑕疵（bit reservoir），提示音场景基本无感。
+- **不支持格式转换**：本包只在原格式上加标识，不做 pcm↔mp3↔wav 编码转换。
 
 ## License
 
