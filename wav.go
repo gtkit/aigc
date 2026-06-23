@@ -66,22 +66,24 @@ func isRIFFWAVE(b []byte) bool {
 }
 
 // wavFmtData 遍历 RIFF chunks，返回 fmt 块内容与 data 块采样数据。
+// 边界判断用 uint64，避免 32 位平台上 int 溢出绕过越界检查（声明 size 接近 2GB 时）。
 func wavFmtData(b []byte) (fmtBody, dataBody []byte, err error) {
 	off := 12
 	for off+8 <= len(b) {
 		id := string(b[off : off+4])
-		size := int(binary.LittleEndian.Uint32(b[off+4 : off+8]))
+		size := binary.LittleEndian.Uint32(b[off+4 : off+8])
 		start := off + 8
-		if size < 0 || start+size > len(b) {
+		if uint64(start)+uint64(size) > uint64(len(b)) {
 			return nil, nil, ErrInvalidWAV
 		}
+		end := start + int(size) // 上面已确保 start+size <= len(b)，int 不溢出
 		switch id {
 		case "fmt ":
-			fmtBody = b[start : start+size]
+			fmtBody = b[start:end]
 		case "data":
-			dataBody = b[start : start+size]
+			dataBody = b[start:end]
 		}
-		off = start + size
+		off = end
 		if size%2 == 1 {
 			off++ // chunk 按偶数字节对齐
 		}

@@ -93,3 +93,17 @@ func TestWAVInvalid(t *testing.T) {
 		t.Fatalf("err = %v, 期望 ErrInvalidWAV", err)
 	}
 }
+
+// TestWAVPrependCueCorruptSize 构造声明 size 越界的 chunk，验证返回错误而非 panic（整数溢出加固回归）。
+func TestWAVPrependCueCorruptSize(t *testing.T) {
+	corrupt := []byte("RIFF")
+	corrupt = append(corrupt, 0x00, 0x00, 0x00, 0x00) // RIFF size 占位
+	corrupt = append(corrupt, "WAVE"...)
+	corrupt = append(corrupt, "fmt "...)
+	corrupt = append(corrupt, 0xff, 0xff, 0xff, 0x7f) // chunk size = 0x7fffffff，远超实际
+	cue := aigc.RhythmWAV(16000)
+
+	if _, err := aigc.PrependCue(corrupt, cue, aigc.WAV, aigc.AtStart); err == nil {
+		t.Fatal("越界 chunk size 应返回错误，而非 panic 或成功")
+	}
+}
